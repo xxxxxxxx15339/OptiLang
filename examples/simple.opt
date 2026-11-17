@@ -1,0 +1,13 @@
+param capacity = 100;
+
+var x: int;
+var y: real;
+
+maximize profit: 3*x + 5*y;
+
+subject to:
+    minimum: x > 0;
+    maximum: x <= capacity;
+
+solve;
+print x, y, profit;
