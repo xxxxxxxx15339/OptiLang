@@ -1,0 +1,18 @@
+# Generated build directory
+/build/
+
+# Flex and Bison generated files
+/parser.tab.cpp
+/parser.tab.hpp
+/parser.tab.h
+/lexer.yy.cpp
+/lexer.c
+
+# Compiled executables
+/lexer
+/parser
+
+# Object files
+*.o
+*.obj
+*.exe
