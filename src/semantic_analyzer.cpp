@@ -27,6 +27,21 @@ double finite(double value, SourceSpan span) { // handles finite / infinite / nu
     // finite(INFINITY, span) -->  Throws SemanticError
 }
 
+LinearExpr scale(LinearExpr expression, double factor, SourceSpan span) {   // Scale by a factor
+    expression.constant = finite(expression.constant * factor, span);
+    for (auto it = expression.coefficients.begin();
+         it != expression.coefficients.end();) {
+        const double value = finite(it->second * factor, span);
+        if (value == 0.0) {
+            it = expression.coefficients.erase(it);
+        } else {
+            it->second = value;
+            ++it;
+        }
+    }
+    return expression;
+}
+
 
 // Mutates destination: destination += factor * source.
 void addScaled(
@@ -54,21 +69,6 @@ void addScaled(
             destination.coefficients.erase(name);  // If variable is absent we assign 0.0 to it;
         }
     }
-}
-
-LinearExpr scale(LinearExpr expression, double factor, SourceSpan span) {   // Scale by a factor
-    expression.constant = finite(expression.constant * factor, span);
-    for (auto it = expression.coefficients.begin();
-         it != expression.coefficients.end();) {
-        const double value = finite(it->second * factor, span);
-        if (value == 0.0) {
-            it = expression.coefficients.erase(it);
-        } else {
-            it->second = value;
-            ++it;
-        }
-    }
-    return expression;
 }
 
 bool approximatelyEqual(double a, double b) {   // Compares the floating points numbers, returns true is they are both approximately equal;
@@ -105,7 +105,7 @@ void SemanticAnalyzer::checkVariable(const std::string& name,
     }
 }
 
-}  // namespace optilang
+}
 
 
 void SemanticAnalyzer::checkDeclarations(const Program& program) const { // CHecks that all the declarations declared in the AST are consistent with the symbole table 
@@ -159,8 +159,9 @@ void SemanticAnalyzer::checkDeclarations(const Program& program) const { // CHec
         check(program.objective->name, program.objective->span,
               ObjectiveSymbol{});
     }
-    if (program.constraints){
-      for (const auto& c : program.constraints)          
+
+    for (const auto& c : program.constraints) {
+      if (!c.name.empty())
         check(c.name, c.span, ConstraintSymbol{});
     }
 }
