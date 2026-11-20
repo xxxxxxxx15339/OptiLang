@@ -1,15 +1,40 @@
 
-%option noyywrap yylineno noinput nounput
+%option noyywrap noinput nounput
 
 %{
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
 #include "parser.tab.hpp"
+
+// Current position in the input file.
+static int currentLine = 1;
+static int currentColumn = 1;
+
+// Called before every matched rule, including whitespace.
+static void trackLocation(const char* text, int length) {
+    yylloc.first_line = currentLine;
+    yylloc.first_column = currentColumn;
+
+    for (int i = 0; i < length; ++i) {
+        if (text[i] == '\n') {
+            ++currentLine;
+            currentColumn = 1;
+        } else {
+            ++currentColumn;
+        }
+    }
+
+    yylloc.last_line = currentLine;
+    yylloc.last_column = currentColumn - 1;
+}
+
+#define YY_USER_ACTION trackLocation(yytext, yyleng);
 %}
 
 DIGIT       [0-9]
-NUMBER_RE   {DIGIT}+(\.{DIGIT}+)?([eE][+-]?{DIGIT}+)?
+NUMBER_RE   ({DIGIT}+(\.{DIGIT}*)?|\.[0-9]+)([eE][+-]?{DIGIT}+)?
 ID          [a-zA-Z_][a-zA-Z0-9_]*
 
 %%
@@ -32,8 +57,8 @@ ID          [a-zA-Z_][a-zA-Z0-9_]*
 ">="          { return GREATER_EQUAL; }
 "<"           { return LESS; }
 ">"           { return GREATER; }
-
 "="           { return EQUAL; }
+
 "+"           { return PLUS; }
 "-"           { return MINUS; }
 "*"           { return MULTIPLY; }
@@ -45,7 +70,7 @@ ID          [a-zA-Z_][a-zA-Z0-9_]*
 ")"           { return RPAREN; }
 
 {NUMBER_RE} {
-    yylval.number = atof(yytext);
+    yylval.number = std::strtod(yytext, nullptr);
     return NUMBER;
 }
 
@@ -54,14 +79,32 @@ ID          [a-zA-Z_][a-zA-Z0-9_]*
     return IDENTIFIER;
 }
 
-"#"[^\n]*      { /* Ignore comments */ }
-[ \t\r\n]+     { /* Ignore whitespace */ }
+"#"[^\n]* {
+    // Ignore comments.
+}
+
+[ \t\r\n]+ {
+    // Ignore whitespace.
+}
+
+<<EOF>> {
+    yylloc.first_line = currentLine;
+    yylloc.first_column = currentColumn;
+    yylloc.last_line = currentLine;
+    yylloc.last_column = currentColumn;
+    return 0;
+}
 
 . {
-    fprintf(stderr,
-        "Lexical error at line %d: '%s'\n",
-        yylineno, yytext);
+    std::fprintf(
+        stderr,
+        "Lexical error at %d:%d: '%s'\n",
+        yylloc.first_line,
+        yylloc.first_column,
+        yytext
+    );
     return INVALID;
 }
 
 %%
+

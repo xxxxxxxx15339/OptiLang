@@ -69,38 +69,26 @@ primary            = NUMBER | IDENTIFIER | "(", expression, ")" ;
 ### Lexical rules
 
 - `IDENTIFIER`: `[A-Za-z_][A-Za-z0-9_]*`, except reserved keywords.
-- `NUMBER`: a nonnegative integer or decimal literal; negative numbers use unary `-`.
+- `NUMBER`: ([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?
 - Comments start with `#` and run to the end of the line.
 - Whitespace is ignored except for error locations.
 - Operators: `+`, `-`, `*`, `<=`, `>=`, `=`, `:`, `;`, `,`, `(`, `)`.
 - Reserved keywords: `param`, `var`, `int`, `real`, `maximize`, `minimize`, `subject`, `to`, `solve`, `print`.
 
-## Semantic rules (not handled by the grammar alone)
+## OptiLang v1 — Final semantic contract
 
-
-1. An objective is optional unless solve; is requested.
-
-2. Constraints are optional.
-
-3. Without constraints:
-   - real variables are unrestricted in R.
-   - int variables are unrestricted in Z.
-
-4. All identifiers share one namespace.
-
-5. Parameter expressions must be constant.
-   Forward parameter references are allowed.
-   Cyclic dependencies are forbidden.
-
-6. Objective and constraint expressions must be affine.
-
-7. Strict inequalities < and > are not supported.
-
-8. print requires solve; and may print declared
-   decision variables or the objective.
-
-9. Feasibility and boundedness are determined
-   by the solver, not the parser.
+1. At least one decision variable must be declared.
+2. Parameters are optional. Their values are evaluated at compile time; forward references are allowed, but cyclic dependencies and decision-variable dependencies are forbidden.
+3. Variables declared `real` have domain \(\mathbb{R}\). Variables declared `int` have domain \(\mathbb{Z}\). No implicit nonnegativity or finite bounds are imposed.
+4. An objective function is optional unless `solve;` is requested.
+5. The `subject to:` section is optional. When present, it must contain at least one constraint.
+6. Valid constraint relations are `<=`, `>=`, and `=`. The frontend may recognize `<` and `>` to provide explicit semantic errors, but these relations are not valid OptiLang v1 constraints.
+7. Objective and constraint expressions must be affine in decision variables.
+8. All declared identifiers share one global namespace and must be unique. Constraints may be unnamed.
+9. The `print` statement requires a preceding `solve;` and may reference declared decision variables or the objective.
+10. Statements must appear in the order: parameters, variables, objective, constraints, solve, print.
+11. Lexical, syntax, and semantic errors must be reported with source locations.
+12. Feasibility, unboundedness, and optimality are solver results, not syntax errors.
 
 ## Valid domain examples
 

@@ -1,4 +1,5 @@
 
+
 %{
 #include <cstdio>
 #include <cstdlib>
@@ -12,24 +13,38 @@
 
 using namespace optilang;
 
-// AST produced by the parser
+// Final AST produced by Bison.
 std::unique_ptr<Program> parsedProgram;
 
+// Flex scanner and Bison error callback.
 int yylex();
 void yyerror(const char* message);
-extern int yylineno;
+
+// Convert a Bison location to OptiLang SourceSpan.
+#define OPTI_SPAN(loc) optilang::SourceSpan{              \
+    {(loc).first_line, (loc).first_column},              \
+    {(loc).last_line, (loc).last_column}                  \
+}
 %}
 
+/*
+ * Types required in the generated parser.tab.hpp.
+ * Flex includes this header to access tokens and YYSTYPE.
+ */
 %code requires {
     #include "core/ast.hpp"
     #include <vector>
     #include <string>
 }
 
-/* Better syntax error messages */
+/* Detailed parser errors and source locations. */
 %define parse.error detailed
+%locations
 
-/* Semantic values */
+/* ==========================================
+   SEMANTIC VALUES
+   ========================================== */
+
 %union {
     double number;
     char* identifier;
@@ -49,31 +64,42 @@ extern int yylineno;
     int kind;
 }
 
-/* Keywords */
+/* ==========================================
+   TOKENS
+   ========================================== */
+
+/* Declarations */
 %token PARAM VAR INT REAL
+
+/* Objective */
 %token MAXIMIZE MINIMIZE
+
+/* Model sections */
 %token SUBJECT TO SOLVE PRINT
 
-/* Comparisons */
+/* Comparison operators */
 %token LESS GREATER
 %token LESS_EQUAL GREATER_EQUAL
 %token EQUAL
 
-/* Arithmetic */
+/* Arithmetic operators */
 %token PLUS MINUS MULTIPLY
 
 /* Punctuation */
 %token COLON SEMICOLON COMMA
 %token LPAREN RPAREN
 
-/* Lexical error */
+/* Invalid lexical token */
 %token INVALID
 
-/* Tokens carrying values */
+/* Tokens with associated values */
 %token <number> NUMBER
 %token <identifier> IDENTIFIER
 
-/* Grammar value types */
+/* ==========================================
+   NONTERMINAL TYPES
+   ========================================== */
+
 %type <params> parameter_list
 %type <param> parameter_decl
 
@@ -82,19 +108,24 @@ extern int yylineno;
 %type <kind> variable_type
 
 %type <objective> objective optional_objective
-%type <constraints> constraint_list optional_constraint_section
 
+%type <constraints> constraint_list
+%type <constraints> optional_constraint_section
 %type <constraint> constraint
 %type <kind> relation
-
-%type <expr> expression term unary primary
 
 %type <kind> optional_solve
 %type <printstmt> optional_print
 %type <names> identifier_list
 
-/* Cleanup on syntax errors */
+%type <expr> expression term unary primary
+
+/* ==========================================
+   MEMORY CLEANUP ON PARSING ERRORS
+   ========================================== */
+
 %destructor { free($$); } <identifier>
+
 %destructor { delete $$; } <expr>
 %destructor { delete $$; } <param> <var>
 %destructor { delete $$; } <objective> <constraint>
@@ -106,9 +137,18 @@ extern int yylineno;
 
 %%
 
-/* ========================================
+/* ==========================================
    1. COMPLETE PROGRAM
-   ======================================== */
+   ========================================== */
+
+/*
+ * Parameters: optional
+ * Variables: at least one
+ * Objective: optional unless solve is present
+ * Constraints: optional
+ * Solve: optional
+ * Print: optional; semantic analyzer requires solve
+ */
 
 program:
     parameter_list
@@ -120,33 +160,45 @@ program:
     {
         auto p = std::make_unique<Program>();
 
+        // 1. Parameters
         p->parameters = std::move(*$1);
+
+        // 2. Variables
         p->variables = std::move(*$2);
 
-        if ($3)
+        // 3. Objective (optional)
+        if ($3) {
             p->objective.emplace(std::move(*$3));
+        }
 
+        // 4. Constraints (possibly empty)
         p->constraints = std::move(*$4);
 
-        if ($5)
-            p->solve = SourceSpan{};
+        // 5. Solve statement (optional)
+        if ($5) {
+            p->solve = OPTI_SPAN(@5);
+        }
 
-        if ($6)
+        // 6. Print statement (optional)
+        if ($6) {
             p->print.emplace(std::move(*$6));
+        }
 
+        // Clean up temporary grammar objects.
         delete $1;
         delete $2;
         delete $3;
         delete $4;
         delete $6;
 
+        // Transfer ownership of the AST.
         parsedProgram = std::move(p);
     }
 ;
 
-/* ========================================
+/* ==========================================
    2. PARAMETERS
-   ======================================== */
+   ========================================== */
 
 parameter_list:
     %empty
@@ -157,6 +209,7 @@ parameter_list:
     {
         $$ = $1;
         $$->push_back(std::move(*$2));
+
         delete $2;
     }
 ;
@@ -167,28 +220,37 @@ parameter_decl:
         $$ = new ParameterDecl{
             std::string($2),
             ExprPtr($4),
-            {}
+            OPTI_SPAN(@$)
         };
 
         free($2);
     }
 ;
 
-/* ========================================
+/* ==========================================
    3. VARIABLES
-   ======================================== */
+   ========================================== */
+
+/*
+ * At least one variable declaration is required.
+ * Bounds are not specified in variable declarations.
+ */
 
 variable_list:
     variable_decl
     {
         $$ = new std::vector<VariableDecl>();
+
         $$->push_back(std::move(*$1));
+
         delete $1;
     }
     | variable_list variable_decl
     {
         $$ = $1;
+
         $$->push_back(std::move(*$2));
+
         delete $2;
     }
 ;
@@ -199,7 +261,7 @@ variable_decl:
         $$ = new VariableDecl{
             std::string($2),
             static_cast<VariableType>($4),
-            {}
+            OPTI_SPAN(@$)
         };
 
         free($2);
@@ -217,9 +279,15 @@ variable_type:
     }
 ;
 
-/* ========================================
+/* ==========================================
    4. OBJECTIVE FUNCTION
-   ======================================== */
+   ========================================== */
+
+/*
+ * Objective is optional during parsing.
+ * SemanticAnalyzer::checkSolve() requires an
+ * objective when solve; is present.
+ */
 
 optional_objective:
     %empty
@@ -239,7 +307,7 @@ objective:
             ObjectiveSense::Maximize,
             std::string($2),
             ExprPtr($4),
-            {}
+            OPTI_SPAN(@$)
         };
 
         free($2);
@@ -250,16 +318,23 @@ objective:
             ObjectiveSense::Minimize,
             std::string($2),
             ExprPtr($4),
-            {}
+            OPTI_SPAN(@$)
         };
 
         free($2);
     }
 ;
 
-/* ========================================
-   5. CONSTRAINTS
-   ======================================== */
+/* ==========================================
+   5. CONSTRAINT SECTION
+   ========================================== */
+
+/*
+ * A constraint section may be absent.
+ *
+ * When present, it must contain at least
+ * one constraint.
+ */
 
 optional_constraint_section:
     %empty
@@ -276,27 +351,34 @@ constraint_list:
     constraint
     {
         $$ = new std::vector<ConstraintDecl>();
+
         $$->push_back(std::move(*$1));
+
         delete $1;
     }
     | constraint_list constraint
     {
         $$ = $1;
+
         $$->push_back(std::move(*$2));
+
         delete $2;
     }
 ;
 
+/*
+ * Both named and unnamed constraints are supported.
+ */
+
 constraint:
-    IDENTIFIER COLON expression relation
-    expression SEMICOLON
+    IDENTIFIER COLON expression relation expression SEMICOLON
     {
         $$ = new ConstraintDecl{
             std::string($1),
             ExprPtr($3),
             static_cast<Relation>($4),
             ExprPtr($5),
-            {}
+            OPTI_SPAN(@$)
         };
 
         free($1);
@@ -308,21 +390,21 @@ constraint:
             ExprPtr($1),
             static_cast<Relation>($2),
             ExprPtr($3),
-            {}
+            OPTI_SPAN(@$)
         };
     }
 ;
 
+/*
+ * Strict inequalities are recognized so that the
+ * Semantic Analyzer can give a clear rejection.
+ *
+ * Valid OptiLang v1 relations:
+ * <=, >=, =
+ */
+
 relation:
-    LESS
-    {
-        $$ = static_cast<int>(Relation::Less);
-    }
-    | GREATER
-    {
-        $$ = static_cast<int>(Relation::Greater);
-    }
-    | LESS_EQUAL
+    LESS_EQUAL
     {
         $$ = static_cast<int>(Relation::LessEqual);
     }
@@ -334,11 +416,19 @@ relation:
     {
         $$ = static_cast<int>(Relation::Equal);
     }
+    | LESS
+    {
+        $$ = static_cast<int>(Relation::Less);
+    }
+    | GREATER
+    {
+        $$ = static_cast<int>(Relation::Greater);
+    }
 ;
 
-/* ========================================
-   6. SOLVE
-   ======================================== */
+/* ==========================================
+   6. SOLVE STATEMENT
+   ========================================== */
 
 optional_solve:
     %empty
@@ -351,9 +441,14 @@ optional_solve:
     }
 ;
 
-/* ========================================
-   7. PRINT
-   ======================================== */
+/* ==========================================
+   7. PRINT STATEMENT
+   ========================================== */
+
+/*
+ * print is syntactically optional.
+ * The Semantic Analyzer requires solve; before print.
+ */
 
 optional_print:
     %empty
@@ -364,7 +459,7 @@ optional_print:
     {
         $$ = new PrintStmt{
             std::move(*$2),
-            {}
+            OPTI_SPAN(@$)
         };
 
         delete $2;
@@ -375,20 +470,37 @@ identifier_list:
     IDENTIFIER
     {
         $$ = new std::vector<std::string>();
-        $$->push_back($1);
+
+        $$->push_back(std::string($1));
+
         free($1);
     }
     | identifier_list COMMA IDENTIFIER
     {
         $$ = $1;
-        $$->push_back($3);
+
+        $$->push_back(std::string($3));
+
         free($3);
     }
 ;
 
-/* ========================================
+/* ==========================================
    8. ARITHMETIC EXPRESSIONS
-   ======================================== */
+   ========================================== */
+
+/*
+ * Precedence is defined by the grammar:
+ *
+ * expression -> addition/subtraction
+ * term       -> multiplication
+ * unary      -> unary plus/minus
+ * primary    -> literals/names/parentheses
+ */
+
+/* ------------------------------------------
+   8.1 ADDITION AND SUBTRACTION
+   ------------------------------------------ */
 
 expression:
     expression PLUS term
@@ -396,7 +508,8 @@ expression:
         $$ = binary(
             BinaryOp::Add,
             ExprPtr($1),
-            ExprPtr($3)
+            ExprPtr($3),
+            OPTI_SPAN(@$)
         ).release();
     }
     | expression MINUS term
@@ -404,7 +517,8 @@ expression:
         $$ = binary(
             BinaryOp::Subtract,
             ExprPtr($1),
-            ExprPtr($3)
+            ExprPtr($3),
+            OPTI_SPAN(@$)
         ).release();
     }
     | term
@@ -413,13 +527,18 @@ expression:
     }
 ;
 
+/* ------------------------------------------
+   8.2 MULTIPLICATION
+   ------------------------------------------ */
+
 term:
     term MULTIPLY unary
     {
         $$ = binary(
             BinaryOp::Multiply,
             ExprPtr($1),
-            ExprPtr($3)
+            ExprPtr($3),
+            OPTI_SPAN(@$)
         ).release();
     }
     | unary
@@ -428,19 +547,25 @@ term:
     }
 ;
 
+/* ------------------------------------------
+   8.3 UNARY PLUS AND MINUS
+   ------------------------------------------ */
+
 unary:
     PLUS unary
     {
         $$ = optilang::unary(
             UnaryOp::Plus,
-            ExprPtr($2)
+            ExprPtr($2),
+            OPTI_SPAN(@$)
         ).release();
     }
     | MINUS unary
     {
         $$ = optilang::unary(
             UnaryOp::Minus,
-            ExprPtr($2)
+            ExprPtr($2),
+            OPTI_SPAN(@$)
         ).release();
     }
     | primary
@@ -449,34 +574,50 @@ unary:
     }
 ;
 
+/* ------------------------------------------
+   8.4 PRIMARY EXPRESSIONS
+   ------------------------------------------ */
+
 primary:
     NUMBER
     {
-        $$ = number($1).release();
+        $$ = number(
+            $1,
+            OPTI_SPAN(@1)
+        ).release();
     }
     | IDENTIFIER
     {
-        $$ = name($1).release();
+        $$ = name(
+            std::string($1),
+            OPTI_SPAN(@1)
+        ).release();
+
         free($1);
     }
     | LPAREN expression RPAREN
     {
         $$ = $2;
+
+        // Include parentheses in the expression span.
+        $$->span = OPTI_SPAN(@$);
     }
 ;
 
 %%
 
-/* ========================================
+/* ==========================================
    9. SYNTAX ERROR HANDLING
-   ======================================== */
+   ========================================== */
 
 void yyerror(const char* message)
 {
     std::cerr
-        << "Syntax error at line "
-        << yylineno
+        << "Syntax error at "
+        << yylloc.first_line
+        << ":"
+        << yylloc.first_column
         << ": "
         << message
-        << std::endl;
+        << '\n';
 }
