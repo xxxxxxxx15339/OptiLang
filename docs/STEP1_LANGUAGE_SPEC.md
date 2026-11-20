@@ -42,9 +42,15 @@ print x, y, z, totalProfit;
 Here, `{ ... }` means zero or more repetitions, `[ ... ]` is optional, and literal terminals are quoted. `EOF` marks the end of the file.
 
 ```ebnf
-program            = { parameter_decl }, variable_decl, { variable_decl },
-                     objective, constraint_section,
-                     [ solve_stmt ], [ print_stmt ], EOF ;
+program =       // The square brackets mean the declaration is optional.
+    { parameter_decl },
+    variable_decl,
+    { variable_decl },
+    [ objective ],
+    [ constraint_section ],
+    [ solve_stmt ],
+    [ print_stmt ],
+    EOF ;
 parameter_decl     = "param", IDENTIFIER, "=", expression, ";" ;
 variable_decl      = "var", IDENTIFIER, ":", type, ";" ;
 type               = "int" | "real" ;
@@ -71,15 +77,30 @@ primary            = NUMBER | IDENTIFIER | "(", expression, ")" ;
 
 ## Semantic rules (not handled by the grammar alone)
 
-1. Parameters evaluate at compile time, and may reference only earlier parameters.
-2. A variable has the domain **R** if declared `real`, or **Z** if declared `int`; it starts without finite individual bounds.
-3. Constraints restrict the feasible solutions. A simple constraint such as `x >= 0` may be extracted as an individual variable bound, whereas `x+y <= 10` remains a general linear constraint.
-4. Names are unique across parameters, variables, named objectives and named constraints.
-5. Objective/constraint expressions must be linear in decision variables; `x*y` is rejected, while `3*x` and `paramA*x` are valid when `paramA` is constant.
-6. The compiler performs parameter substitution, constant folding, like-term combination and constraint normalization.
-7. Detect undeclared identifiers, duplicate names, invalid constant parameter expressions, nonlinear expressions, contradictory constant constraints and conflicting simple variable bounds. General infeasibility is the solver's responsibility.
-8. `print` must occur after `solve` and can refer to a declared variable or the objective name.
-9. One objective and at least one constraint are required in this version.
+
+1. An objective is optional unless solve; is requested.
+
+2. Constraints are optional.
+
+3. Without constraints:
+   - real variables are unrestricted in R.
+   - int variables are unrestricted in Z.
+
+4. All identifiers share one namespace.
+
+5. Parameter expressions must be constant.
+   Forward parameter references are allowed.
+   Cyclic dependencies are forbidden.
+
+6. Objective and constraint expressions must be affine.
+
+7. Strict inequalities < and > are not supported.
+
+8. print requires solve; and may print declared
+   decision variables or the objective.
+
+9. Feasibility and boundedness are determined
+   by the solver, not the parser.
 
 ## Valid domain examples
 

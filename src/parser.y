@@ -81,9 +81,9 @@ extern int yylineno;
 %type <var> variable_decl
 %type <kind> variable_type
 
-%type <objective> objective
+%type <objective> objective optional_objective
+%type <constraints> constraint_list optional_constraint_section
 
-%type <constraints> constraint_list
 %type <constraint> constraint
 %type <kind> relation
 
@@ -113,9 +113,8 @@ extern int yylineno;
 program:
     parameter_list
     variable_list
-    objective
-    SUBJECT TO COLON
-    constraint_list
+    optional_objective
+    optional_constraint_section
     optional_solve
     optional_print
     {
@@ -123,20 +122,23 @@ program:
 
         p->parameters = std::move(*$1);
         p->variables = std::move(*$2);
-        p->objective.emplace(std::move(*$3));
-        p->constraints = std::move(*$7);
 
-        if ($8)
+        if ($3)
+            p->objective.emplace(std::move(*$3));
+
+        p->constraints = std::move(*$4);
+
+        if ($5)
             p->solve = SourceSpan{};
 
-        if ($9)
-            p->print.emplace(std::move(*$9));
+        if ($6)
+            p->print.emplace(std::move(*$6));
 
         delete $1;
         delete $2;
         delete $3;
-        delete $7;
-        delete $9;
+        delete $4;
+        delete $6;
 
         parsedProgram = std::move(p);
     }
@@ -219,6 +221,17 @@ variable_type:
    4. OBJECTIVE FUNCTION
    ======================================== */
 
+optional_objective:
+    %empty
+    {
+        $$ = nullptr;
+    }
+    | objective
+    {
+        $$ = $1;
+    }
+;
+
 objective:
     MAXIMIZE IDENTIFIER COLON expression SEMICOLON
     {
@@ -247,6 +260,17 @@ objective:
 /* ========================================
    5. CONSTRAINTS
    ======================================== */
+
+optional_constraint_section:
+    %empty
+    {
+        $$ = new std::vector<ConstraintDecl>();
+    }
+    | SUBJECT TO COLON constraint_list
+    {
+        $$ = $4;
+    }
+;
 
 constraint_list:
     constraint

@@ -4,6 +4,9 @@
 #include <memory>
 
 #include "core/ast.hpp"
+#include "core/semantic_analyzer.hpp"
+#include "core/symbol_table_builder.hpp"
+#include "core/linear_ir.hpp"
 
 using namespace optilang;
 
@@ -27,7 +30,6 @@ int main(int argc, char** argv) {
     }
 
     int result = yyparse();
-
     fclose(yyin);
 
     if (result == 0 && parsedProgram) {

@@ -105,8 +105,6 @@ void SemanticAnalyzer::checkVariable(const std::string& name,
     }
 }
 
-}
-
 
 void SemanticAnalyzer::checkDeclarations(const Program& program) const { // CHecks that all the declarations declared in the AST are consistent with the symbole table 
     std::unordered_set<std::string> declared;
@@ -314,15 +312,47 @@ void SemanticAnalyzer::checkSolve(const Program& program) const {
     }
 }
 
-void SemanticAnalyzer::checkPrint(const Program& program) const {
-    if (!program.print) return;
+
+void SemanticAnalyzer::checkPrint(
+    const Program& program
+) const {
+    if (!program.print)
+        return;
+
+    // Printing solution values requires solving first.
+    if (!program.solve) {
+        fail(
+            program.print->span,
+            "print requires a preceding solve statement"
+        );
+    }
+
     for (const std::string& name : program.print->names) {
         const Symbol* symbol = symbols_.find(name);
-        if (!symbol)
-            fail(program.print->span, "cannot print undeclared identifier '" + name + "'");
-        if (std::holds_alternative<ConstraintSymbol>(symbol->data))
-            fail(program.print->span, "constraint '" + name +
-                                        "' is not a printable numeric value");
+
+        if (!symbol) {
+            fail(
+                program.print->span,
+                "cannot print undeclared identifier '" + name + "'"
+            );
+        }
+
+        bool isVariable =
+            std::holds_alternative<VariableSymbol>(
+                symbol->data
+            );
+
+        bool isObjective =
+            std::holds_alternative<ObjectiveSymbol>(
+                symbol->data
+            );
+
+        if (!isVariable && !isObjective) {
+            fail(
+                program.print->span,
+                "'" + name + "' is not a printable solution value"
+            );
+        }
     }
 }
 

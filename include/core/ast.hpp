@@ -114,7 +114,7 @@ struct PrintStmt {
 struct Program {
     std::vector<ParameterDecl> parameters;
     std::vector<VariableDecl> variables;
-    std::optional<ObjectiveDecl> objective;  // Exactly one required by grammar.
+    std::optional<ObjectiveDecl> objective;  // Optional unless solve; is present..
     std::vector<ConstraintDecl> constraints;
     std::optional<SourceSpan> solve;          // Presence represents "solve;".
     std::optional<PrintStmt> print;
