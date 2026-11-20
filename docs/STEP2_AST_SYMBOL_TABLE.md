@@ -1,11 +1,14 @@
 # Step 2 — Shared AST and symbol table (revised)
 
-The frontend (Person 1, Flex/Bison) creates `Program` and its expression nodes; the backend (Person 2) validates and lowers the AST. The parser does **not** simplify source expressions.
+The Flex/Bison frontend creates `Program` and its expression nodes. The
+symbol table builder registers declarations and evaluates parameters. The
+semantic analyzer validates the AST, and the IR builder lowers affine
+expressions to a solver model.
 
 ## File responsibilities
 
-- `include/optilang/ast.hpp`: common expression and statement node types, source spans and helper constructors.
-- `include/optilang/symbol_table.hpp`: declaration metadata, name lookup, and optional individual bounds recorded by later semantic analysis.
+- `include/core/ast.hpp`: common expression and statement node types, source spans and helper constructors.
+- `include/core/symbol_table.hpp`: declaration metadata, name lookup, and optional individual bounds in variable metadata.
 - `tests/ast_symbol_demo.cpp`: verifies the interfaces independently of Flex/Bison.
 
 ## AST outline
@@ -13,8 +16,8 @@ The frontend (Person 1, Flex/Bison) creates `Program` and its expression nodes; 
 ```text
 Program
   parameters: [ParameterDecl(name, Expr)]
-  variables:  [VariableDecl(name, type)]               <-- NO BOUNDS HERE
-  objective:  ObjectiveDecl(sense, name, Expr)
+  variables:  [VariableDecl(name, type)]
+  objective:  optional ObjectiveDecl(sense, name, Expr)
   constraints: [ConstraintDecl(label?, left, op, right)]
   solve:      optional source location
   print:      optional list of identifiers
@@ -38,7 +41,7 @@ struct VariableDecl {
 struct ConstraintDecl {
     std::string name;        // Empty = unnamed
     ExprPtr left;
-    Relation relation;       // <=, >=, =
+    Relation relation;       // Strict relations are rejected by semantic analysis.
     ExprPtr right;
     SourceSpan span{};
 };
@@ -56,21 +59,14 @@ struct VariableSymbol {
 };
 ```
 
-Both optionals are empty when the variable is declared. **They are not parsed from `var`.** At a later stage, semantic analysis may populate them from constraints; for instance `x >= 0;` and `x <= 40;` imply `[0,40]`. Do not infer a single-variable bound from a multi-variable inequality without additional reasoning.
+Both optionals are empty for variables built from source. Constraints are
+normalized as separate IR rows. The CLI pipeline currently leaves these bound
+fields empty. If a caller supplies explicit IR bounds for an integer variable,
+the GLPK backend applies `ceil(lowerBound)` and `floor(upperBound)`.
 
-For `int` variables, the backend can tighten fractional individual bounds using `ceil(lowerBound)` and `floor(upperBound)` and detect empty integer intervals.
-
-`SymbolTable::insert()` rejects duplicate names. `find()` is read-only, while `findMutable()` exists for later semantic bound inference. All names share one namespace in v1.
-
-## Division between teammates
-
-| Person 1 — Parser | Person 2 — Semantics |
-|---|---|
-| Build expression nodes | Evaluate parameter values |
-| Build variable declarations containing name and type only | Register variables as unbounded |
-| Build named and unnamed constraint nodes | Validate linearity, symbols, arithmetic |
-| Preserve line/column spans | Simplify expressions and infer simple bounds |
-| Parse `solve`/`print` | Validate `print`, generate normalized linear IR |
+`SymbolTable::insert()` rejects duplicate names. `find()` provides read-only
+lookup and `findMutable()` provides mutable lookup. Declared identifiers share
+one namespace.
 
 ## Example AST-to-symbol processing
 
@@ -89,18 +85,18 @@ solve;
 print x, y, z, profit;
 ```
 
-Initially all three `VariableSymbol`s have empty lower/upper bounds. After **later** analysis, `x` has `[0,40]`, but `y` and `z` still have no individual finite bounds. The general `x+y <= 100` constraint stays in the linear model.
+All three `VariableSymbol` entries have empty lower and upper bounds. The
+IR stores `minX`, `maxX`, and `capacity` as separate rows. GLPK enforces the
+bounds on `x` through the first two rows.
 
 ## Build smoke test
 
-From this folder:
+From the repository root, after configuring and building as described in the
+[README](../README.md):
 
 ```bash
-g++ -std=c++17 -Wall -Wextra -Wpedantic -Iinclude \
-    tests/ast_symbol_demo.cpp -o ast_demo
-./ast_demo
+ctest --test-dir build/cmake -R '^test_ast$' --output-on-failure
 ```
 
-Expected: `Updated Step 1/2 AST and symbol table smoke test passed.`
-
-This is an AST and symbol-table contract test only; the Flex/Bison parser, full semantic analyzer, and solver are intentionally outside Step 1/2.
+The smoke test creates an AST and exercises symbol-table lookup independently
+of the parser and solver.

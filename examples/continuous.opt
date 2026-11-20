@@ -1,0 +1,16 @@
+# Forward references and both constraint sides are resolved before solving.
+param offset = base + .5;
+param base = 2e0;
+
+var x: real;
+var y: real;
+
+minimize cost: -(x - 2*x) + y + offset;
+
+subject to:
+    limit: 2*x + 3 <= y + 8;
+    y = -1.5;
+    x >= -2.5;
+
+solve;
+print x, cost;
